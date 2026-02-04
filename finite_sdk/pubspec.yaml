@@ -1,0 +1,28 @@
+name: finite_sdk
+description: "The Finite core experience SDK."
+version: 0.0.1
+publish_to: 'none'
+
+environment:
+  sdk: ^3.5.0    # Updated to match main app
+  flutter: ">=3.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Dependencies (Synced with Main App)
+  google_fonts: ^6.1.0
+  intl: ^0.19.0           # Matches Main App
+  shared_preferences: ^2.2.2 # Matches Main App
+  home_widget: ^0.7.0     # Updated from 0.3.0 to match Main App
+  sqflite: ^2.3.0
+  path: ^1.8.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0   # Updated to match Main App
+
+flutter:
+  uses-material-design: true
