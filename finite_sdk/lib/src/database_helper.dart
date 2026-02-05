@@ -86,6 +86,16 @@ CREATE TABLE memories (
   description $textType
   )
 ''');
+
+    await db.execute('''
+CREATE TABLE goals ( 
+  id $idType, 
+  dateMillis $intType,
+  colorIndex $intType,
+  title $textType,
+  description $textType
+  )
+''');
   }
 
   Future<Memory> create(Memory memory) async {
@@ -136,4 +146,106 @@ CREATE TABLE memories (
       whereArgs: [id],
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // GOAL OPERATIONS
+  // ---------------------------------------------------------------------------
+
+  Future<Goal> createGoal(Goal goal) async {
+    final db = await instance.database;
+    final id = await db.insert('goals', goal.toJson());
+    return goal.copy(id: id);
+  }
+
+  Future<Goal> readGoal(int id) async {
+    final db = await instance.database;
+    final maps = await db.query(
+      'goals',
+      columns: ['id', 'dateMillis', 'colorIndex', 'title', 'description'],
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+
+    if (maps.isNotEmpty) {
+      return Goal.fromJson(maps.first);
+    } else {
+      throw Exception('Goal ID $id not found');
+    }
+  }
+
+  Future<List<Goal>> readAllGoals() async {
+    final db = await instance.database;
+    // Order by date (ascending for goals? No, let's keep it flexible, effectively nearest future first usually makes sense but let's just do generic sort for now)
+    final result = await db.query('goals', orderBy: 'dateMillis ASC');
+    return result.map((json) => Goal.fromJson(json)).toList();
+  }
+
+  Future<int> updateGoal(Goal goal) async {
+    final db = await instance.database;
+    return db.update(
+      'goals',
+      goal.toJson(),
+      where: 'id = ?',
+      whereArgs: [goal.id],
+    );
+  }
+
+  Future<int> deleteGoal(int id) async {
+    final db = await instance.database;
+    return await db.delete(
+      'goals',
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// THE GOAL MODEL
+// ---------------------------------------------------------------------------
+class Goal {
+  final int? id;
+  final int dateMillis;
+  final int colorIndex;
+  final String title;
+  final String description;
+
+  const Goal({
+    this.id,
+    required this.dateMillis,
+    required this.colorIndex,
+    required this.title,
+    required this.description,
+  });
+
+  Goal copy({
+    int? id,
+    int? dateMillis,
+    int? colorIndex,
+    String? title,
+    String? description,
+  }) =>
+      Goal(
+        id: id ?? this.id,
+        dateMillis: dateMillis ?? this.dateMillis,
+        colorIndex: colorIndex ?? this.colorIndex,
+        title: title ?? this.title,
+        description: description ?? this.description,
+      );
+
+  static Goal fromJson(Map<String, Object?> json) => Goal(
+        id: json['id'] as int?,
+        dateMillis: json['dateMillis'] as int,
+        colorIndex: json['colorIndex'] as int,
+        title: json['title'] as String,
+        description: json['description'] as String,
+      );
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'dateMillis': dateMillis,
+        'colorIndex': colorIndex,
+        'title': title,
+        'description': description,
+      };
 }

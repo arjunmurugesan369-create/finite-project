@@ -313,6 +313,9 @@ class _ArtifactScreenState extends State<ArtifactScreen> {
   List<Memory> _allMemories = [];
   Map<int, List<Memory>> _memoryCache = {};
 
+  List<Goal> _allGoals = [];
+  Map<int, List<Goal>> _goalCache = {};
+
   final List<Color> _palette = [
     const Color(0xFFFF4500),
     const Color(0xFF7393B3),
@@ -330,7 +333,7 @@ class _ArtifactScreenState extends State<ArtifactScreen> {
 
     final now = DateTime.now();
     _isMoonlight = now.hour >= 20 || now.hour < 6;
-    _refreshMemories();
+    _refreshData();
   }
 
   void _toggleMoonlight() {
@@ -340,11 +343,13 @@ class _ArtifactScreenState extends State<ArtifactScreen> {
     });
   }
 
-  Future<void> _refreshMemories() async {
-    final data = await DatabaseHelper.instance.readAllMemories();
+  Future<void> _refreshData() async {
+    final memData = await DatabaseHelper.instance.readAllMemories();
+    final goalData = await DatabaseHelper.instance.readAllGoals();
     if (mounted) {
       setState(() {
-        _allMemories = data;
+        _allMemories = memData;
+        _allGoals = goalData;
       });
       _recalculateCache();
     }
@@ -432,28 +437,41 @@ class _ArtifactScreenState extends State<ArtifactScreen> {
   }
 
   void _recalculateCache() {
-    final Map<int, List<Memory>> tempMap = {};
+    final Map<int, List<Memory>> tempMemMap = {};
+    final Map<int, List<Goal>> tempGoalMap = {};
     final dob = _dob;
+
+    int getIndex(DateTime date) {
+      if (_currentScale == LifeScale.weeks) {
+        return date.difference(dob).inDays ~/ 7;
+      } else if (_currentScale == LifeScale.months) {
+        return (date.year - dob.year) * 12 + (date.month - dob.month);
+      } else {
+        return date.year - dob.year;
+      }
+    }
 
     for (var mem in _allMemories) {
       final date = DateTime.fromMillisecondsSinceEpoch(mem.dateMillis);
-      int index;
-      if (_currentScale == LifeScale.weeks) {
-        index = date.difference(dob).inDays ~/ 7;
-      } else if (_currentScale == LifeScale.months) {
-        index = (date.year - dob.year) * 12 + (date.month - dob.month);
-      } else {
-        index = date.year - dob.year;
-      }
-
+      final index = getIndex(date);
       if (index >= 0) {
-        if (tempMap[index] == null) tempMap[index] = [];
-        tempMap[index]!.add(mem);
+        if (tempMemMap[index] == null) tempMemMap[index] = [];
+        tempMemMap[index]!.add(mem);
+      }
+    }
+
+    for (var goal in _allGoals) {
+      final date = DateTime.fromMillisecondsSinceEpoch(goal.dateMillis);
+      final index = getIndex(date);
+      if (index >= 0) {
+        if (tempGoalMap[index] == null) tempGoalMap[index] = [];
+        tempGoalMap[index]!.add(goal);
       }
     }
 
     setState(() {
-      _memoryCache = tempMap;
+      _memoryCache = tempMemMap;
+      _goalCache = tempGoalMap;
     });
   }
 
@@ -476,6 +494,25 @@ class _ArtifactScreenState extends State<ArtifactScreen> {
     }
   }
 
+  void _handleGoalDotTap(List<Goal> goals) {
+    if (goals.length == 1) {
+      _openGoalCanvas(goals.first);
+    } else {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: Colors.transparent,
+        isScrollControlled: true,
+        builder: (context) => GoalClusterSheet(
+            goals: goals,
+            palette: _palette,
+            onSelect: (goal) {
+              Navigator.pop(context);
+              _openGoalCanvas(goal);
+            }),
+      );
+    }
+  }
+
   void _openCanvas(Memory? memory, [DateTime? dateOverride]) async {
     final date =
         dateOverride ?? DateTime.fromMillisecondsSinceEpoch(memory!.dateMillis);
@@ -492,7 +529,24 @@ class _ArtifactScreenState extends State<ArtifactScreen> {
     );
 
     // Always refresh when coming back, in case of save OR delete
-    _refreshMemories();
+    _refreshData();
+  }
+
+  void _openGoalCanvas(Goal? goal, [DateTime? dateOverride]) async {
+    final date =
+        dateOverride ?? DateTime.fromMillisecondsSinceEpoch(goal!.dateMillis);
+
+    final bool? shouldRefresh = await Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, _) => GoalCanvas(
+            initialDate: date, initialGoal: goal, palette: _palette),
+        transitionsBuilder: (context, animation, _, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+      ),
+    );
+
+    _refreshData();
   }
 
   Color _getDominantColor(List<Memory> memories) {
@@ -502,6 +556,20 @@ class _ArtifactScreenState extends State<ArtifactScreen> {
     final frequency = <int, int>{};
     for (var m in memories) {
       frequency[m.colorIndex] = (frequency[m.colorIndex] ?? 0) + 1;
+    }
+    final dominantEntry = frequency.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+
+    return _palette[dominantEntry.first.key];
+  }
+
+  Color _getDominantGoalColor(List<Goal> goals) {
+    if (goals.isEmpty) return Colors.transparent;
+    if (goals.length == 1) return _palette[goals.first.colorIndex];
+
+    final frequency = <int, int>{};
+    for (var g in goals) {
+      frequency[g.colorIndex] = (frequency[g.colorIndex] ?? 0) + 1;
     }
     final dominantEntry = frequency.entries.toList()
       ..sort((a, b) => b.value.compareTo(a.value));
@@ -743,13 +811,41 @@ class _ArtifactScreenState extends State<ArtifactScreen> {
                           currentSize: dotSize);
                     }
 
+                    // FUTURE / GOALS
+                    final goals = _goalCache[index];
+                    if (goals != null && goals.isNotEmpty) {
+                      final dominantColor = goals.length == 1
+                          ? _palette[goals.first.colorIndex]
+                          : _getDominantGoalColor(goals);
+
+                      return GestureDetector(
+                        onTap: () => _handleGoalDotTap(goals),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: dominantColor,
+                            border: goals.length > 1
+                                ? Border.all(
+                                    color: Colors.white.withOpacity(0.5),
+                                    width: 1.5)
+                                : null,
+                          ),
+                        ),
+                      );
+                    }
+
                     Color futureColor = fogColor;
                     if (_isMoonlight) futureColor = Colors.transparent;
 
-                    return _Dot(
-                        type: _DotType.future,
-                        color: futureColor,
-                        currentSize: dotSize);
+                    return GestureDetector(
+                        onTap: () {
+                          // Tap on empty future dot -> Create Goal
+                          _openGoalCanvas(null, DateTime.now()); // Date will be adjusted by user or we could calculate roughly
+                        },
+                        child: _Dot(
+                            type: _DotType.future,
+                            color: futureColor,
+                            currentSize: dotSize));
                   },
                   childCount: totalUnits,
                 ),
@@ -1359,6 +1455,358 @@ class _PulsingDotState extends State<_PulsingDot>
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 8. GOAL CANVAS (Duplicate of MemoryCanvas for Goals)
+// ---------------------------------------------------------------------------
+
+class GoalCanvas extends StatefulWidget {
+  final DateTime initialDate;
+  final Goal? initialGoal;
+  final List<Color> palette;
+
+  const GoalCanvas({
+    required this.initialDate,
+    required this.initialGoal,
+    required this.palette,
+    super.key,
+  });
+
+  @override
+  State<GoalCanvas> createState() => _GoalCanvasState();
+}
+
+class _GoalCanvasState extends State<GoalCanvas> {
+  late DateTime _date;
+  late TextEditingController _titleCtrl;
+  late TextEditingController _descCtrl;
+  late int _colorIndex;
+  Timer? _debounce;
+  int? _goalId;
+
+  @override
+  void initState() {
+    super.initState();
+    _date = widget.initialDate;
+    _goalId = widget.initialGoal?.id;
+    _titleCtrl = TextEditingController(text: widget.initialGoal?.title ?? "");
+    _descCtrl =
+        TextEditingController(text: widget.initialGoal?.description ?? "");
+    _colorIndex = widget.initialGoal?.colorIndex ?? 0;
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _titleCtrl.dispose();
+    _descCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onChanged() {
+    if (_debounce?.isActive ?? false) _debounce!.cancel();
+    _debounce = Timer(const Duration(milliseconds: 600), _saveGoal);
+    setState(() {});
+  }
+
+  Future<void> _changeDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _date,
+      firstDate: DateTime.now(), // Goals are for future (or today)
+      lastDate: DateTime(2100),
+      builder: (context, child) => Theme(
+        data: ThemeData.light().copyWith(
+          colorScheme: const ColorScheme.light(primary: Color(0xFF1A1A1A)),
+        ),
+        child: child!,
+      ),
+    );
+
+    if (picked != null && picked != _date) {
+      setState(() => _date = picked);
+      _saveGoal();
+    }
+  }
+
+  Future<void> _saveGoal() async {
+    if (_titleCtrl.text.isEmpty && _descCtrl.text.isEmpty) return;
+
+    final goal = Goal(
+      id: _goalId,
+      dateMillis: _date.millisecondsSinceEpoch,
+      colorIndex: _colorIndex,
+      title: _titleCtrl.text,
+      description: _descCtrl.text,
+    );
+
+    if (_goalId == null) {
+      final newGoal = await DatabaseHelper.instance.createGoal(goal);
+      setState(() => _goalId = newGoal.id);
+    } else {
+      await DatabaseHelper.instance.updateGoal(goal);
+    }
+  }
+
+  // --- DELETE LOGIC ---
+  Future<void> _deleteGoal() async {
+    if (_goalId == null) return;
+
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Forget this goal?", style: GoogleFonts.fraunces()),
+        content: Text(
+          "This action cannot be undone.",
+          style: GoogleFonts.inter(),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text("Cancel", style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text("Forget", style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await DatabaseHelper.instance.deleteGoal(_goalId!);
+      if (mounted) Navigator.pop(context, true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final bgColor = const Color(0xFFFAFAFA);
+    final textColor = const Color(0xFF1A1A1A);
+    final accentColor = widget.palette[_colorIndex];
+
+    return Hero(
+      tag: 'goal_${_goalId ?? "new"}',
+      child: Scaffold(
+        backgroundColor: bgColor,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: Icon(CupertinoIcons.chevron_down,
+                color: textColor.withOpacity(0.5)),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: GestureDetector(
+            onTap: _changeDate,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: accentColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: accentColor.withOpacity(0.2)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    DateFormat('MMMM d, yyyy').format(_date),
+                    style: GoogleFonts.inter(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: accentColor),
+                  ),
+                  const SizedBox(width: 4),
+                  Icon(Icons.edit,
+                      size: 12, color: accentColor.withOpacity(0.5))
+                ],
+              ),
+            ),
+          ),
+          centerTitle: true,
+          actions: [
+            if (_goalId != null)
+              IconButton(
+                icon: const Icon(CupertinoIcons.trash, size: 20),
+                color: Colors.red.withOpacity(0.7),
+                onPressed: _deleteGoal,
+              ),
+            const SizedBox(width: 16),
+          ],
+        ),
+        body: SafeArea(
+          child: ListView(
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            children: [
+              const SizedBox(height: 20),
+              // Color Picker
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(widget.palette.length, (index) {
+                  final isSelected = _colorIndex == index;
+                  return GestureDetector(
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setState(() => _colorIndex = index);
+                      _saveGoal();
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 300),
+                      margin: const EdgeInsets.symmetric(horizontal: 6),
+                      width: isSelected ? 24 : 16,
+                      height: isSelected ? 24 : 16,
+                      decoration: BoxDecoration(
+                        color: widget.palette[index],
+                        shape: BoxShape.circle,
+                        border: isSelected
+                            ? Border.all(color: textColor, width: 2)
+                            : null,
+                      ),
+                    ),
+                  );
+                }),
+              ),
+              const SizedBox(height: 40),
+
+              TextField(
+                controller: _titleCtrl,
+                onChanged: (_) => _onChanged(),
+                maxLines: null,
+                style: GoogleFonts.fraunces(
+                    fontSize: 32,
+                    height: 1.2,
+                    fontWeight: FontWeight.w600,
+                    color: textColor),
+                decoration: InputDecoration(
+                  hintText: "Untitled Goal.",
+                  hintStyle:
+                      GoogleFonts.fraunces(color: textColor.withOpacity(0.2)),
+                  border: InputBorder.none,
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              TextField(
+                controller: _descCtrl,
+                onChanged: (_) => _onChanged(),
+                maxLines: null,
+                style: GoogleFonts.inter(
+                  fontSize: 18,
+                  height: 1.6,
+                  color: textColor.withOpacity(0.8),
+                ),
+                decoration: InputDecoration(
+                  hintText: "What do you hope to achieve...",
+                  hintStyle:
+                      GoogleFonts.inter(color: textColor.withOpacity(0.2)),
+                  border: InputBorder.none,
+                ),
+              ),
+              const SizedBox(height: 100),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class GoalClusterSheet extends StatelessWidget {
+  final List<Goal> goals;
+  final List<Color> palette;
+  final Function(Goal) onSelect;
+
+  const GoalClusterSheet(
+      {required this.goals,
+      required this.palette,
+      required this.onSelect,
+      super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFFF4F4F0),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: const EdgeInsets.fromLTRB(24, 32, 24, 40),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                "Goals for this cycle",
+                style: GoogleFonts.fraunces(
+                    fontSize: 20, color: const Color(0xFF1A1A1A)),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                    color: Colors.black12,
+                    borderRadius: BorderRadius.circular(12)),
+                child: Text("${goals.length}",
+                    style: GoogleFonts.inter(fontWeight: FontWeight.bold)),
+              )
+            ],
+          ),
+          const SizedBox(height: 20),
+          Flexible(
+            child: ListView.separated(
+              shrinkWrap: true,
+              physics: const BouncingScrollPhysics(),
+              itemCount: goals.length,
+              separatorBuilder: (_, __) => const Divider(height: 20),
+              itemBuilder: (context, index) {
+                final goal = goals[index];
+                final date =
+                    DateTime.fromMillisecondsSinceEpoch(goal.dateMillis);
+
+                return InkWell(
+                  onTap: () => onSelect(goal),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: palette[goal.colorIndex]),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              goal.title.isEmpty ? "Untitled" : goal.title,
+                              style: GoogleFonts.inter(
+                                  fontWeight: FontWeight.bold, fontSize: 16),
+                            ),
+                            Text(
+                              DateFormat('MMM d, yyyy').format(date),
+                              style: GoogleFonts.inter(
+                                  color: Colors.grey, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Icon(CupertinoIcons.chevron_right,
+                          size: 16, color: Colors.grey)
+                    ],
+                  ),
+                );
+              },
+            ),
+          )
+        ],
       ),
     );
   }
