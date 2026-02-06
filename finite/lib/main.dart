@@ -587,7 +587,7 @@ class _ArtifactScreenState extends State<ArtifactScreen> {
     final Color stoneColor =
         _isMoonlight ? const Color(0xFF333333) : const Color(0xFFD1D1CB);
     final Color fogColor =
-        _isMoonlight ? const Color(0xFF1A1A1A) : const Color(0xFFE5E5E0);
+        _isMoonlight ? const Color(0xFF1A1A1A) : const Color(0xFFD6D6D1);
     final Color accentColor = const Color(0xFFFF4500);
 
     int totalUnits, livedUnits;
@@ -631,22 +631,7 @@ class _ArtifactScreenState extends State<ArtifactScreen> {
       child: Scaffold(
         backgroundColor: bgColor,
         floatingActionButton: FloatingActionButton(
-          onPressed: () async {
-            final picked = await showDatePicker(
-              context: context,
-              initialDate: DateTime.now(),
-              firstDate: _dob,
-              lastDate: DateTime.now(),
-              builder: (context, child) => Theme(
-                data: ThemeData.light().copyWith(
-                  colorScheme:
-                      const ColorScheme.light(primary: Color(0xFF1A1A1A)),
-                ),
-                child: child!,
-              ),
-            );
-            if (picked != null) _openCanvas(null, picked);
-          },
+          onPressed: () => _showCreationSheet(),
           backgroundColor: accentColor,
           child: const Icon(CupertinoIcons.add, color: Colors.white),
         ),
@@ -837,15 +822,11 @@ class _ArtifactScreenState extends State<ArtifactScreen> {
                     Color futureColor = fogColor;
                     if (_isMoonlight) futureColor = Colors.transparent;
 
-                    return GestureDetector(
-                        onTap: () {
-                          // Tap on empty future dot -> Create Goal
-                          _openGoalCanvas(null, DateTime.now()); // Date will be adjusted by user or we could calculate roughly
-                        },
-                        child: _Dot(
-                            type: _DotType.future,
-                            color: futureColor,
-                            currentSize: dotSize));
+                    // UPDATED: No gesture detector on empty future dots
+                    return _Dot(
+                        type: _DotType.future,
+                        color: futureColor,
+                        currentSize: dotSize);
                   },
                   childCount: totalUnits,
                 ),
@@ -1807,6 +1788,147 @@ class GoalClusterSheet extends StatelessWidget {
             ),
           )
         ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 9. CREATION SHEET
+// ---------------------------------------------------------------------------
+extension CreationSheet on _ArtifactScreenState {
+  void _showCreationSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFFF4F4F0),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("What's on your mind?",
+                style: GoogleFonts.fraunces(
+                    fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 24),
+            _CreationTile(
+              icon: CupertinoIcons.pen,
+              title: "Save a Memory",
+              subtitle: "Document the past",
+              color: const Color(0xFF7393B3),
+              onTap: () {
+                Navigator.pop(context);
+                _pickDateAndCreate(isGoal: false);
+              },
+            ),
+            const SizedBox(height: 16),
+            _CreationTile(
+              icon: CupertinoIcons.flag_fill,
+              title: "Set a Goal",
+              subtitle: "Design the future",
+              color: const Color(0xFFFF4500),
+              onTap: () {
+                Navigator.pop(context);
+                _pickDateAndCreate(isGoal: true);
+              },
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickDateAndCreate({required bool isGoal}) async {
+    final now = DateTime.now();
+    final firstDate = isGoal ? now : _dob;
+    final lastDate = isGoal ? DateTime(2100) : now;
+    final initialDate = now;
+
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate,
+      firstDate: firstDate,
+      lastDate: lastDate,
+      builder: (context, child) => Theme(
+        data: ThemeData.light().copyWith(
+          colorScheme: const ColorScheme.light(primary: Color(0xFF1A1A1A)),
+        ),
+        child: child!,
+      ),
+    );
+
+    if (picked != null) {
+      if (isGoal) {
+        _openGoalCanvas(null, picked);
+      } else {
+        _openCanvas(null, picked);
+      }
+    }
+  }
+}
+
+class _CreationTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _CreationTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(
+                color: Colors.black.withOpacity(0.05),
+                blurRadius: 10,
+                offset: const Offset(0, 4))
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                  color: color.withOpacity(0.1), shape: BoxShape.circle),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(width: 16),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title,
+                    style: GoogleFonts.inter(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
+                Text(subtitle,
+                    style: GoogleFonts.inter(
+                        fontSize: 12, color: Colors.grey[600])),
+              ],
+            ),
+            const Spacer(),
+            const Icon(CupertinoIcons.chevron_right,
+                size: 20, color: Colors.grey),
+          ],
+        ),
       ),
     );
   }

@@ -1,7 +1,7 @@
 name: finite
 description: A life calendar with breathing weeks
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.5.0
